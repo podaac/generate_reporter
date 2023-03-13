@@ -26,14 +26,13 @@ Arguemnts:
 
 Execution:
 
-**NOTES**
-- 
+``docker run --rm --name reporter -v /processor/data:/mnt/data reporter:0.1`
 
 ## aws infrastructure
 
 The reporter includes the following AWS services:
 - AWS Lambda function.
-- AWS SNS Topic `email_reports`.
+- AWS SNS Topic `reporter`.
 - AWS SNS Topic `batch-job-failures`.
 
 ## terraform 
