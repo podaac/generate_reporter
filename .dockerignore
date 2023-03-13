@@ -1,1 +1,6 @@
 terraform
+LICENSE
+Dockerfile
+README.md
+.gitignore
+reporter/__pycache__

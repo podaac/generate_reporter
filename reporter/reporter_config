@@ -9,13 +9,12 @@
 
 # Points to where the Perl & IDL codes are installed.
 
-setenv GHRSST_PERL_LIB_DIRECTORY /
+setenv GHRSST_PERL_LIB_DIRECTORY $LAMBDA_TASK_ROOT
 
 # Scratch directory to store temporary files, MAFs and registry.
 
-setenv SCRATCH_AREA /
-
+setenv SCRATCH_AREA /mnt/data/processor/scratch
 
 # Log directory to store processing logs
 
-setenv PROCESSING_LOGS /
+setenv PROCESSING_LOGS /mnt/data/processor/logs/processing_logs
