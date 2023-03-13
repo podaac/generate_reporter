@@ -9,7 +9,7 @@ RUN  pip3 install -r requirements.txt --target "${LAMBDA_TASK_ROOT}"
 
 # Stage 2 - Copy Generate code
 # FROM stage1 as stage2
-COPY . ${LAMBDA_TASK_ROOT}
+COPY ./reporter/* ${LAMBDA_TASK_ROOT}/
 
 # Stage 3 - Execute code
 # FROM stage2 as stage3

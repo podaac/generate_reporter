@@ -30,8 +30,7 @@ import botocore
 from notify import notify
 
 # Constants
-# DATA_DIR = pathlib.Path("/mnt/data")    # Mounted Processor EFS directory
-DATA_DIR = pathlib.Path("/data/dev/tebaldi/aws/reporter/processor")    # Mounted Processor EFS directory
+DATA_DIR = pathlib.Path("/mnt/data")    # Mounted Processor EFS directory
 TOPIC_STRING = "reporter"
 
 def event_handler(event, context):
@@ -137,13 +136,13 @@ def generate_report(dataset, processing_type, file_ids, logger):
         lambda_task_root = os.getenv('LAMBDA_TASK_ROOT')
         try:
             if dataset == "modis_a" or dataset == "modis_t":
-                subprocess.run([f"{lambda_task_root}/reporter/print_modis_daily_report.csh", \
+                subprocess.run([f"{lambda_task_root}/print_modis_daily_report.csh", \
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
-                    cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)
+                    cwd=f"{lambda_task_root}", check=True, stderr=PIPE)
             else:
-                subprocess.run([f"{lambda_task_root}/reporter/print_generic_daily_report.csh", \
+                subprocess.run([f"{lambda_task_root}/print_generic_daily_report.csh", \
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
-                    cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)        
+                    cwd=f"{lambda_task_root}", check=True, stderr=PIPE)        
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.decode("utf-8").strip()
             sigevent_description = error_msg if len(error_msg) != 0 else "Error encountered in print_generic_daily_report.csh"
@@ -260,7 +259,7 @@ def remove_processing_files(dataset_dict, logger):
         
     # Delete all files in list
     for file in file_list: file.unlink()
-    logger.info("Processing files deleted from logging and scratch directories.")
+    logger.info("Processing files deleted from log and scratch directories.")
                 
         
 def handle_error(sigevent_description, sigevent_data, logger):

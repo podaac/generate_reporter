@@ -15,7 +15,7 @@
 # The shell script calls the Perl subroutine with the same name.
 #
 
-source $LAMBDA_TASK_ROOT/reporter/reporter_config
+source $LAMBDA_TASK_ROOT/reporter_config
 
 set i_first_arg = $argv[1]
 
