@@ -137,10 +137,9 @@ def generate_report(dataset, processing_type, file_ids, logger):
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
                     cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)
             else:
-                print("")
-                # subprocess.run([f"{lambda_task_root}/reporter/print_generic_daily_report.csh", \
-                #     file_id, dataset.upper(), processing_type.upper(), "today"], \
-                #     cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)        
+                subprocess.run([f"{lambda_task_root}/reporter/print_generic_daily_report.csh", \
+                    file_id, dataset.upper(), processing_type.upper(), "today"], \
+                    cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)        
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.decode("utf-8").strip()
             sigevent_description = error_msg if len(error_msg) != 0 else "Error encountered in print_generic_daily_report.csh"
@@ -209,7 +208,7 @@ def publish_report(dataset_email, logger):
     # Publish to topic
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
     subject = f"Generate Daily Processing Report {date} UTC"
-    message = f"Generate Processing Report for {date} UTC\n"
+    message = f"Generate Processing Report for {date} UTC\n\n"
     for processing_type in dataset_email.values():
         for email in processing_type.values():
             message += email
