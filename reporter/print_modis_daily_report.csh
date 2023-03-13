@@ -138,8 +138,6 @@ else
 #    endif
 endif
 
-# Check exit code
-
 # Get contents of error file indicator see if any errors were encountered in python script
 set error_file="/tmp/error.txt"
 if ( -f "$error_file" ) then

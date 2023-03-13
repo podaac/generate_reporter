@@ -312,6 +312,8 @@ usage() if $options{h};
 
 my $l_monitor_status = print_modis_daily_report($l_unique_id,$l_instrument,$l_data_type,$l_report_date,$l_report_year);
 
+# Check for errors
+
 if ($l_monitor_status == 1){
   system("touch", "/tmp/error.txt");
   print "print_modis_daily_report.pl encountered an error. Exiting.\n";
