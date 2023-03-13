@@ -20,6 +20,7 @@ import pathlib
 import subprocess
 from subprocess import PIPE
 import sys
+import zipfile
 
 # Third-party imports
 import boto3
@@ -61,6 +62,9 @@ def event_handler(event, context):
     
     # Publish report
     publish_report(dataset_email, logger)
+    
+    # Remove logs and registries
+    remove_processing_files(dataset_dict, logger)
     
     end = datetime.datetime.now()
     logger.info(f"Execution time - {end - start}.")
@@ -161,8 +165,12 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email):
         Dictionary to store email message alongside dataset.
     """
     
+    # Create reports directory if it does not exist
+    report_dir = DATA_DIR.joinpath("scratch")
+    report_dir.mkdir(parents=False, exist_ok=True)
+    
     # Locate refined reports and create email
-    report_prefix = DATA_DIR.joinpath("scratch", "reports", f"daily_report_{dataset.upper()}_{processing_type.upper()}_")
+    report_prefix = report_dir.joinpath("reports", f"daily_report_{dataset.upper()}_{processing_type.upper()}_")
     num_files_processed = 0
     num_files_registry = 0
     
@@ -225,6 +233,35 @@ def publish_report(dataset_email, logger):
         handle_error(sigevent_description, sigevent_data, logger)
     
     logger.info(f"Message published to SNS Topic: {topic_arn}.")
+    
+def remove_processing_files(dataset_dict, logger):
+    """Compress and remove logs (txt) and registry (dat) processing files."""
+    
+    # Generate list of processing files
+    processing = DATA_DIR.joinpath("logs", "processing_logs")
+    registry = DATA_DIR.joinpath("scratch")
+    file_list = []
+    for dataset, processing_dict in dataset_dict.items():
+        for processing_type, file_ids in processing_dict.items():
+            for file_id in file_ids:
+                processing_file = processing.joinpath(f"ghrsst_{dataset}_processing_log_archive_{file_id}.txt")
+                if processing_file.exists(): file_list.append(processing_file)
+                registry_file = registry.joinpath(f"ghrsst_master_{dataset}_{processing_type}_list_processed_files_{file_id}.dat")
+                if registry_file.exists(): file_list.append(registry_file)
+                
+    # Compress list
+    archive_dir = DATA_DIR.joinpath("scratch", "reports", "archive")
+    archive_dir.mkdir(parents=False, exist_ok=True)
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    zip_file = archive_dir.joinpath(f"{today}_process_files.zip")
+    with zipfile.ZipFile(zip_file, mode='w') as archive:
+        for file in file_list: archive.write(file, arcname=file.name)
+    logger.info(f"Archive of processing files written to: {zip_file}")
+        
+    # Delete all files in list
+    for file in file_list: file.unlink()
+    logger.info("Processing files deleted from logging and scratch directories.")
+                
         
 def handle_error(sigevent_description, sigevent_data, logger):
     """Handle errors by logging them and sending out a notification."""
