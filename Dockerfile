@@ -1,6 +1,6 @@
 # Stage 0 - Create from Python 3.10-alpine3.15 image
 FROM amazon/aws-lambda-python:3.9
-RUN yum update -y && yum install -y tcsh
+RUN yum update -y && yum install -y tcsh perl 
 
 # Stage 1 - Install dependencies
 # FROM stage0 as stage1
