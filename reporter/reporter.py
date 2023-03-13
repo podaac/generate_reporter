@@ -31,6 +31,7 @@ from notify import notify
 # Constants
 # DATA_DIR = pathlib.Path("/mnt/data")    # Mounted Processor EFS directory
 DATA_DIR = pathlib.Path("/data/dev/tebaldi/aws/reporter/processor")    # Mounted Processor EFS directory
+TOPIC_STRING = "reporter"
 
 def event_handler(event, context):
     """Parse EventBridge schedule input for arguments and generate reports."""
@@ -41,26 +42,25 @@ def event_handler(event, context):
     
     # Locate unique identifiers
     dataset_dict = { 
-        "modis_a": { "refined": [], "quicklook": [] }, 
-        "modis_t": { "refined": [], "quicklook": [] }, 
-        "viirs":   { "refined": [], "quicklook": [] }
+        "modis_a": { "quicklook": [], "refined": [] }, 
+        "modis_t": { "quicklook": [], "refined": [] }, 
+        "viirs":   { "quicklook": [], "refined": [] }
     }
     locate_processing_files(dataset_dict, logger)
     
     # Generate reports for each unique identifier and combine into single report
     dataset_email = { 
-        "modis_a": { "refined": "", "quicklook": "" }, 
-        "modis_t": { "refined": "", "quicklook": "" }, 
-        "viirs":   { "refined": "", "quicklook": "" }
+        "modis_a": { "quicklook": "", "refined": "" }, 
+        "modis_t": { "quicklook": "", "refined": "" }, 
+        "viirs":   { "quicklook": "", "refined": "" }
     }
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, logger)
             combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email)
     
-    # Publish report        
-    print(dataset_email["modis_a"]["refined"])
-    print(dataset_email["modis_a"]["quicklook"])
+    # Publish report
+    publish_report(dataset_email, logger)
     
     end = datetime.datetime.now()
     logger.info(f"Execution time - {end - start}.")
@@ -137,9 +137,10 @@ def generate_report(dataset, processing_type, file_ids, logger):
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
                     cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)
             else:
-                subprocess.run([f"{lambda_task_root}/reporter/print_generic_daily_report.csh", \
-                    file_id, dataset.upper(), processing_type.upper(), "today"], \
-                    cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)        
+                print("")
+                # subprocess.run([f"{lambda_task_root}/reporter/print_generic_daily_report.csh", \
+                #     file_id, dataset.upper(), processing_type.upper(), "today"], \
+                #     cwd=f"{lambda_task_root}/reporter", check=True, stderr=PIPE)        
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr.decode("utf-8").strip()
             sigevent_description = error_msg if len(error_msg) != 0 else "Error encountered in print_generic_daily_report.csh"
@@ -177,9 +178,54 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email):
                 dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
             num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
             num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
-        
-    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_processed}, extracted from: ghrsst_{dataset}_processing_log_archive_uniqueid.txt\n"
-    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_registry}, extracted from: ghrsst_master_{dataset}_datatype_list_processed_files_uniqueid.dat\n"
+    
+    # Beginning of report when no files are processed
+    if num_files_processed == 0 or num_files_registry == 0:
+        date_printed = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
+        dataset_email[dataset][processing_type] += "==========================================================================================\n"
+        dataset_email[dataset][processing_type] += f"Product: list of {processing_type.upper()} {dataset.upper()} L2P files processed\n"
+        dataset_email[dataset][processing_type] += f"Date_printed: {date_printed}\n"
+    
+    # Record the number of files processed both from logs and in registry
+    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
+    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
+
+def publish_report(dataset_email, logger):
+    """Publish report to SNS Topic."""
+    
+    sns = boto3.client("sns")
+    
+    # Get topic ARN
+    try:
+        topics = sns.list_topics()
+    except botocore.exceptions.ClientError as e:
+        sigevent_description = "Failed to list SNS Topics."
+        sigevent_data = f"Error - {e}"
+        handle_error(sigevent_description, sigevent_data, logger)
+    for topic in topics["Topics"]:
+        if TOPIC_STRING in topic["TopicArn"]:
+            topic_arn = topic["TopicArn"]
+            
+    # Publish to topic
+    date = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
+    subject = f"Generate Daily Processing Report {date} UTC"
+    message = f"Generate Processing Report for {date} UTC\n"
+    for processing_type in dataset_email.values():
+        for email in processing_type.values():
+            message += email
+            message += "\n"
+    try:
+        response = sns.publish(
+            TopicArn = topic_arn,
+            Message = message,
+            Subject = subject
+        )
+    except botocore.exceptions.ClientError as e:
+        sigevent_description = f"Failed to publish to SNS Topic: {topic_arn}."
+        sigevent_data = f"Error - {e}"
+        handle_error(sigevent_description, sigevent_data, logger)
+    
+    logger.info(f"Message published to SNS Topic: {topic_arn}.")
         
 def handle_error(sigevent_description, sigevent_data, logger):
     """Handle errors by logging them and sending out a notification."""
