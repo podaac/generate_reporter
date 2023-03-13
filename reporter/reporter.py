@@ -57,7 +57,7 @@ def event_handler(event, context):
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, logger)
-            combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email)
+            combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, logger)
     
     # Publish report
     publish_report(dataset_email, logger)
@@ -149,7 +149,7 @@ def generate_report(dataset, processing_type, file_ids, logger):
             sigevent_data = f"Subprocess Run command: {e.cmd}"
             handle_error(sigevent_description, sigevent_data, logger)
     
-def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email):
+def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, logger):
     """Combine reports produced for a single dataset.
     
     Parameters
@@ -169,21 +169,26 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email):
     report_dir.mkdir(parents=False, exist_ok=True)
     
     # Locate refined reports and create email
-    report_prefix = report_dir.joinpath("reports", f"daily_report_{dataset.upper()}_{processing_type.upper()}_")
     num_files_processed = 0
     num_files_registry = 0
     
     for file_id in file_ids:
-        report_name = f"{report_prefix}{file_id}.txt"
-        with open(report_name) as fh:
-            report_lines = fh.read().splitlines()
-            
-        if len(report_lines) != 0:
-            # Beginning of report
-            if dataset_email[dataset][processing_type] == "":
-                dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
-            num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
-            num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
+        report_name = report_dir.joinpath("reports", f"daily_report_{dataset.upper()}_{processing_type.upper()}_{file_id}.txt")
+        if report_name.exists():
+            with open(report_name) as fh:
+                report_lines = fh.read().splitlines()
+                
+            if len(report_lines) != 0:
+                # Beginning of report
+                if dataset_email[dataset][processing_type] == "":
+                    dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
+                num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
+                num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
+            logger.info(f"Read and processed report: {report_name}.")
+        else:
+            logger.error(f"Cannot locate daily report: {report_name}.")
+            sigevent_description = f"Cannot locate daily report: {report_name}."
+            handle_error(sigevent_description, "", logger)
     
     # Beginning of report when no files are processed
     if num_files_processed == 0 or num_files_registry == 0:
@@ -195,7 +200,7 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email):
     # Record the number of files processed both from logs and in registry
     dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
     dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
-
+    
 def publish_report(dataset_email, logger):
     """Publish report to SNS Topic."""
     
