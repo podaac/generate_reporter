@@ -1,0 +1,4 @@
+reporter/__pycache__
+
+*.terraform/
+tfplan
