@@ -13,8 +13,8 @@ setenv GHRSST_PERL_LIB_DIRECTORY $LAMBDA_TASK_ROOT
 
 # Scratch directory to store temporary files, MAFs and registry.
 
-setenv SCRATCH_AREA /mnt/data/processor/scratch
+setenv SCRATCH_AREA /mnt/data/scratch
 
 # Log directory to store processing logs
 
-setenv PROCESSING_LOGS /mnt/data/processor/logs/processing_logs
+setenv PROCESSING_LOGS /mnt/data/logs/processing_logs

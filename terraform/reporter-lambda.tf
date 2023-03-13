@@ -5,7 +5,15 @@ resource "aws_lambda_function" "aws_lambda_reporter" {
   role          = aws_iam_role.aws_lambda_reporter_execution_role.arn
   package_type  = "Image"
   memory_size   = 256
-  timeout       = 900
+  timeout       = 300
+  vpc_config {
+    subnet_ids         = data.aws_subnets.private_application_subnets.ids
+    security_group_ids = data.aws_security_groups.vpc_default_sg.ids
+  }
+  file_system_config {
+    arn              = data.aws_efs_access_points.aws_efs_generate_ap.arns[0]
+    local_mount_path = "/mnt/data"
+  }
 }
 
 # AWS Lambda execution role & policy
@@ -46,6 +54,39 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
           "logs:PutLogEvents"
         ],
         "Resource" : "arn:aws:logs:*:*:*"
+      },
+      {
+        "Sid" : "AllowVPCAccess",
+        "Effect" : "Allow",
+        "Action" : [
+          "ec2:CreateNetworkInterface"
+        ],
+        "Resource" : concat([for subnet in data.aws_subnet.private_application_subnet : subnet.arn], ["arn:aws:ec2:${var.aws_region}:${local.account_id}:*/*"])
+      },
+      {
+        "Sid" : "AllowVPCDelete",
+        "Effect" : "Allow",
+        "Action" : [
+          "ec2:DeleteNetworkInterface"
+        ],
+        "Resource" : "arn:aws:ec2:${var.aws_region}:${local.account_id}:*/*"
+      },
+      {
+        "Sid" : "AllowVPCDescribe",
+        "Effect" : "Allow",
+        "Action" : [
+          "ec2:DescribeNetworkInterfaces",
+        ],
+        "Resource" : "*"
+      },
+      {
+        "Sid" : "AllowEFSAccess",
+        "Effect" : "Allow",
+        "Action" : [
+          "elasticfilesystem:ClientMount",
+          "elasticfilesystem:ClientWrite"
+        ],
+        "Resource" : "${data.aws_efs_access_points.aws_efs_generate_ap.arns[0]}"
       },
       {
         "Effect" : "Allow",
