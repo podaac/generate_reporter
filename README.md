@@ -26,7 +26,7 @@ Arguemnts:
 
 Execution:
 
-``docker run --rm --name reporter -v /processor/data:/mnt/data reporter:0.1`
+`docker run --rm --name reporter -v /processor/data:/mnt/data reporter:0.1`
 
 ## aws infrastructure
 
