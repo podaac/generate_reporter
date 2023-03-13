@@ -1,0 +1,21 @@
+####################################################################################################
+#
+# This file contains environments for running GHRSST MODIS L2P and MAF processing subsystems.
+#
+# This file will be sourced by all cronjobs to fetch the environment variables used within
+# Perl and IDL codes.
+#
+####################################################################################################
+
+# Points to where the Perl & IDL codes are installed.
+
+setenv GHRSST_PERL_LIB_DIRECTORY /
+
+# Scratch directory to store temporary files, MAFs and registry.
+
+setenv SCRATCH_AREA /
+
+
+# Log directory to store processing logs
+
+setenv PROCESSING_LOGS /
