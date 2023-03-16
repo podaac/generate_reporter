@@ -1,6 +1,6 @@
 # AWS Lambda function
 resource "aws_lambda_function" "aws_lambda_reporter" {
-  image_uri     = "${local.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${var.prefix}-reporter:latest"
+  image_uri     = "${data.aws_ecr_repository.reporter.repository_url}:latest"
   function_name = "${var.prefix}-reporter"
   role          = aws_iam_role.aws_lambda_reporter_execution_role.arn
   package_type  = "Image"
@@ -11,7 +11,7 @@ resource "aws_lambda_function" "aws_lambda_reporter" {
     security_group_ids = data.aws_security_groups.vpc_default_sg.ids
   }
   file_system_config {
-    arn              = data.aws_efs_access_points.aws_efs_generate_ap.arns[0]
+    arn              = data.aws_efs_access_points.aws_efs_generate_ap.arns[1]
     local_mount_path = "/mnt/data"
   }
 }
@@ -86,7 +86,7 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
           "elasticfilesystem:ClientMount",
           "elasticfilesystem:ClientWrite"
         ],
-        "Resource" : "${data.aws_efs_access_points.aws_efs_generate_ap.arns[0]}"
+        "Resource" : "${data.aws_efs_access_points.aws_efs_generate_ap.arns[1]}"
       },
       {
         "Effect" : "Allow",

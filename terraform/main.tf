@@ -25,6 +25,10 @@ provider "aws" {
 # Data sources
 data "aws_caller_identity" "current" {}
 
+data "aws_ecr_repository" "reporter" {
+  name = "${var.prefix}-reporter"
+}
+
 data "aws_efs_access_points" "aws_efs_generate_ap" {
   file_system_id = data.aws_efs_file_system.aws_efs_generate.id
 }

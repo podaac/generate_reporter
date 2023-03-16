@@ -16,7 +16,7 @@ None.
 
 ## execute command
 
-Arguemnts:
+Arguments (internal):
 1.	unique_id
 2.	instrument
 3.	data_type
