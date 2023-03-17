@@ -166,7 +166,7 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     
     # Create reports directory if it does not exist
     report_dir = DATA_DIR.joinpath("scratch")
-    report_dir.mkdir(parents=False, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
     
     # Locate refined reports and create email
     num_files_processed = 0
