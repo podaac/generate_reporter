@@ -181,9 +181,14 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
             if len(report_lines) != 0:
                 # Beginning of report
                 if dataset_email[dataset][processing_type] == "":
-                    dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
-                num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
-                num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
+                    if "There were no" in report_lines[0]: 
+                        dataset_email[dataset][processing_type] += report_lines[0] + "\n"
+                    else:
+                        dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
+                # Locate number of files processed if applicable
+                if not "There were no" in report_lines[0]:
+                    num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
+                    num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
             logger.info(f"Read and processed report: {report_name}.")
         else:
             logger.error(f"Cannot locate daily report: {report_name}.")
@@ -255,7 +260,7 @@ def remove_processing_files(dataset_dict, logger):
                 
     # Compress list
     archive_dir = DATA_DIR.joinpath("scratch", "reports", "archive")
-    archive_dir.mkdir(parents=False, exist_ok=True)
+    archive_dir.mkdir(parents=True, exist_ok=True)
     today = datetime.datetime.now().strftime("%Y%m%d")
     zip_file = archive_dir.joinpath(f"{today}_process_files.zip")
     with zipfile.ZipFile(zip_file, mode='w') as archive:
