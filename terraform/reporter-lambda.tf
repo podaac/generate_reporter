@@ -104,6 +104,22 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
           "${data.aws_sns_topic.batch_failure_topic.arn}",
           "${aws_sns_topic.aws_sns_topic_reporter.arn}"
         ]
+      },
+      {
+        "Sid" : "AllowListBucket",
+        "Effect" : "Allow",
+        "Action" : [
+          "s3:ListBucket"
+        ],
+        "Resource" : "${data.aws_s3_bucket.download_lists.arn}"
+      },
+      {
+        "Sid" : "AllowGetObject",
+        "Effect" : "Allow",
+        "Action" : [
+          "s3:GetObject"
+        ],
+        "Resource" : "${data.aws_s3_bucket.download_lists.arn}/*"
       }
     ]
   })
@@ -165,6 +181,9 @@ resource "aws_scheduler_schedule" "aws_schedule_reporter" {
   target {
     arn      = aws_lambda_function.aws_lambda_reporter.arn
     role_arn = aws_iam_role.aws_eventbridge_reporter_execution_role.arn
+    input = jsonencode({
+      "prefix" : "${var.prefix}"
+    })
   }
 }
 

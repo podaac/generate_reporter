@@ -41,6 +41,10 @@ data "aws_kms_key" "aws_s3" {
   key_id = "alias/aws/s3"
 }
 
+data "aws_s3_bucket" "download_lists" {
+  bucket = "${var.prefix}-download-lists"
+}
+
 data "aws_security_groups" "vpc_default_sg" {
   filter {
     name   = "group-name"

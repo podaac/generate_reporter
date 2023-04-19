@@ -14,6 +14,7 @@ It performs the following:
 # Standard imports
 import datetime
 import glob
+import json
 import logging
 import os
 import pathlib
@@ -25,6 +26,7 @@ import zipfile
 # Third-party imports
 import boto3
 import botocore
+import fsspec
 
 # Local imports
 from notify import notify
@@ -32,15 +34,21 @@ from notify import notify
 # Constants
 DATA_DIR = pathlib.Path("/mnt/data")    # Mounted Processor EFS directory
 TOPIC_STRING = "reporter"
+DATASET_DICT = {
+    "aqua": "MODIS_A",
+    "terra": "MODIS_T",
+    "viirs": "VIIRS"
+}
 
 def event_handler(event, context):
     """Parse EventBridge schedule input for arguments and generate reports."""
     
     start = datetime.datetime.now()
     
+    prefix = event["prefix"]
     logger = get_logger()
     
-    # Locate unique identifiers
+    # # Locate unique identifiers
     dataset_dict = { 
         "modis_a": { "quicklook": [], "refined": [] }, 
         "modis_t": { "quicklook": [], "refined": [] }, 
@@ -58,9 +66,17 @@ def event_handler(event, context):
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, logger)
             combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, logger)
-    
+            
+    # Report on refined SST in holding tank
+    refined_sst_email = {
+        "aqua":  "", 
+        "terra": "", 
+        "viirs": ""
+    }
+    generate_refined_report(prefix, refined_sst_email, logger)
+        
     # Publish report
-    publish_report(dataset_email, logger)
+    publish_report(dataset_email, refined_sst_email, logger)
     
     # Remove logs and registries
     remove_processing_files(dataset_dict, logger)
@@ -205,8 +221,59 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     # Record the number of files processed both from logs and in registry
     dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
     dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
+
+def generate_refined_report(prefix, refined_sst_email, logger):
+    """Generate report data on the number of refined SST files being held
+    in the holding tank (download lists S3 bucket)."""
     
-def publish_report(dataset_email, logger):
+    for dataset in refined_sst_email.keys():
+        try:
+            refined_sst_email[dataset] = load_holding_tank(prefix, dataset, logger)
+        except Exception as e:
+            sigevent_description = f"Failed to load JSON files from holding tank."
+            sigevent_data = f"Error - {e}"
+            handle_error(sigevent_description, sigevent_data, logger)
+        
+def load_holding_tank(prefix, dataset, logger):
+    """Load JSON files and trach the number of refined SST files.
+    
+    Returns number of SST files.
+    """
+    
+    sst = 0
+    s3_client = boto3.client("s3")
+    try:
+        response = s3_client.list_objects_v2(Bucket=f"{prefix}-download-lists", Prefix=f"holding_tank/{dataset}")
+    except botocore.exceptions.ClientError as e:
+        raise e
+    
+    # List files
+    if not "Contents" in response.keys(): 
+        logger.info(f"No files were found in the holding tank for {dataset}.")
+        return sst
+    
+    if len(response["Contents"]) > 0:
+        logger.info(f"Files were found in the holding tank for {dataset}.")
+        json_files = []
+        for item in response["Contents"]:
+            if item["Key"] == f"holding_tank/{dataset}/": continue
+            json_files.append(item["Key"])
+        
+        # Try load file data
+        s3_url = f"s3://{prefix}-download-lists"
+        for json_file in json_files:
+            try:
+                with fsspec.open(f"{s3_url}/{json_file}", mode='r') as fh:
+                    sst += len(json.load(fh))
+            except botocore.exceptions.ClientError as e:    # Delete
+                raise e
+            except Exception as e:
+                logger.info(f"Issue with JSON file: {json_file['Key']}.")    # fsspec
+                raise e
+            
+    return sst
+
+def publish_report(dataset_email, refined_sst_email, logger):
     """Publish report to SNS Topic."""
     
     sns = boto3.client("sns")
@@ -225,11 +292,19 @@ def publish_report(dataset_email, logger):
     # Publish to topic
     date = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
     subject = f"Generate Daily Processing Report {date} UTC"
+    # Processing report
     message = f"Generate Processing Report for {date} UTC\n\n"
+    line = "==========================================================================================\n"
     for processing_type in dataset_email.values():
         for email in processing_type.values():
             message += email
             message += "\n"
+    # Refined SST report
+    message += line
+    message += f"Report on refined SST files in the holding tank for {date} UTC\n\n"
+    for dataset, num_sst in refined_sst_email.items():
+        message += f"Number of Refined SST for {DATASET_DICT[dataset]}: {num_sst}\n"
+    message += "\n"
     try:
         response = sns.publish(
             TopicArn = topic_arn,
@@ -258,18 +333,19 @@ def remove_processing_files(dataset_dict, logger):
                 registry_file = registry.joinpath(f"ghrsst_master_{dataset}_{processing_type}_list_processed_files_{file_id}.dat")
                 if registry_file.exists(): file_list.append(registry_file)
                 
-    # Compress list
-    archive_dir = DATA_DIR.joinpath("scratch", "reports", "archive")
-    archive_dir.mkdir(parents=True, exist_ok=True)
-    today = datetime.datetime.now().strftime("%Y%m%d")
-    zip_file = archive_dir.joinpath(f"{today}_process_files.zip")
-    with zipfile.ZipFile(zip_file, mode='w') as archive:
-        for file in file_list: archive.write(file, arcname=file.name)
-    logger.info(f"Archive of processing files written to: {zip_file}")
-        
-    # Delete all files in list
-    for file in file_list: file.unlink()
-    logger.info("Processing files deleted from log and scratch directories.")
+    if len(file_list) > 0:
+        # Compress list
+        archive_dir = DATA_DIR.joinpath("scratch", "reports", "archive")
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        today = datetime.datetime.now().strftime("%Y%m%d")
+        zip_file = archive_dir.joinpath(f"{today}_process_files.zip")
+        with zipfile.ZipFile(zip_file, mode='w') as archive:
+            for file in file_list: archive.write(file, arcname=file.name)
+        logger.info(f"Archive of processing files written to: {zip_file}")
+            
+        # Delete all files in list
+        for file in file_list: file.unlink()
+        logger.info("Processing files deleted from log and scratch directories.")
                 
         
 def handle_error(sigevent_description, sigevent_data, logger):
@@ -281,6 +357,3 @@ def handle_error(sigevent_description, sigevent_data, logger):
     notify(logger, sigevent_type, sigevent_description, sigevent_data)
     logger.error("Program exit.")
     sys.exit(1)
-        
-if __name__ == "__main__":
-    event_handler(None, None)
