@@ -81,9 +81,8 @@ jobs:
               -backend-config="bucket=${PREFIX_ENV}-tf-state" \
               -backend-config="key=purger.tfstate" \
               -backend-config="region=${AWS_DEFAULT_REGION}"
-
-          terraform plan
-        # terraform apply -auto-approve
+          
+          terraform apply -auto-approve
 
       # Deploy Lambda Container Image
       - name: Deploy Container Image
