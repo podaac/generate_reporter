@@ -84,7 +84,8 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
         "Effect" : "Allow",
         "Action" : [
           "elasticfilesystem:ClientMount",
-          "elasticfilesystem:ClientWrite"
+          "elasticfilesystem:ClientWrite",
+          "elasticfilesystem:DescribeMountTargets"
         ],
         "Resource" : "${data.aws_efs_access_points.aws_efs_generate_ap.arns[1]}"
       },
