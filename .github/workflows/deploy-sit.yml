@@ -56,7 +56,7 @@ jobs:
 
       # Create ECR repository (if it does not exist)
       - name: Create AWS ECR Repository
-        run: .deploy/deploy-ecr.sh $REGISTRY $REPOSITORY
+        run: deploy/deploy-ecr.sh $REGISTRY $REPOSITORY
 
       # Build and push Lambda container
       - name: Build and Push to AWS ECR
@@ -86,4 +86,4 @@ jobs:
 
       # Deploy Lambda Container Image
       - name: Deploy Container Image
-        run: .deploy/deploy-lambda.sh ${PREFIX_ENV}-reporter $REGISTRY/$REPOSITORY:$IMAGE_TAG
+        run: deploy/deploy-lambda.sh ${PREFIX_ENV}-reporter $REGISTRY/$REPOSITORY:$IMAGE_TAG
