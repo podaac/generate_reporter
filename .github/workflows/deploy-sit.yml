@@ -79,7 +79,7 @@ jobs:
         run: |
           terraform init -reconfigure \
               -backend-config="bucket=${PREFIX_ENV}-tf-state" \
-              -backend-config="key=purger.tfstate" \
+              -backend-config="key=reporter.tfstate" \
               -backend-config="region=${AWS_DEFAULT_REGION}"
           
           terraform apply -auto-approve
