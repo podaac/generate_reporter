@@ -69,6 +69,7 @@ jobs:
         run: |
           echo "TF_VAR_environment=$TARGET_ENV" >> $GITHUB_ENV
           echo "TF_VAR_prefix=$PREFIX_ENV" >> $GITHUB_ENV
+          echo "TF_VAR_sns_topic_email=${{ secrets.SNS_TOPIC_EMAIL }}" >> $GITHUB_ENV
 
       # Deploy Terraform
       - name: Deploy Terraform
