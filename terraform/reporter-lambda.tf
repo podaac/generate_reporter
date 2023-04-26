@@ -87,6 +87,7 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
           "elasticfilesystem:ClientWrite",
           "elasticfilesystem:DescribeMountTargets"
         ],
+        "Resource" : "${data.aws_efs_access_point.fsap_reporter.file_system_arn}"
         "Condition" : {
           "StringEquals": {
             "elasticfilesystem:AccessPointArn" : "${data.aws_efs_access_point.fsap_reporter.arn}"
