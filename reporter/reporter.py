@@ -26,7 +26,6 @@ import zipfile
 # Third-party imports
 import boto3
 import botocore
-import fsspec
 
 # Local imports
 from notify import notify
