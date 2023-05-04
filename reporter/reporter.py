@@ -52,7 +52,7 @@ def event_handler(event, context):
         "modis_t": { "quicklook": [], "refined": [] }, 
         "viirs":   { "quicklook": [], "refined": [] }
     }
-    locate_processing_files(dataset_dict, logger)
+    total_reports = locate_processing_files(dataset_dict, logger)
     
     # Generate reports for each unique identifier and combine into single report
     dataset_email = { 
@@ -60,10 +60,10 @@ def event_handler(event, context):
         "modis_t": { "quicklook": "", "refined": "" }, 
         "viirs":   { "quicklook": "", "refined": "" }
     }
+    logger.info(f"Generating and combining {len(total_reports)} daily reports.")
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, logger)
-            logger.info("Combining daily reports into a single report for all datasets.")
             combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, logger)
         
     # Publish report
@@ -112,17 +112,22 @@ def locate_processing_files(dataset_dict, logger):
         dictionary of 'aqua', 'terra' and 'viirs' keys with quicklook and refined.
     """
     
+    total_reports = 0
     for dataset in dataset_dict.keys():
         refined_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*refined*.dat")
         if len(refined_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in refined_processing_files ]
             dataset_dict[dataset]["refined"] = unique_ids
+            total_reports += len(unique_ids)
             logger.info(f"Found {len(unique_ids)} refined processing file(s) for dataset: {dataset.upper()}.")
         quicklook_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*quicklook*.dat")
         if len(quicklook_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in quicklook_processing_files ]
             dataset_dict[dataset]["quicklook"] = unique_ids
+            total_reports += len(unique_ids)
             logger.info(f"Found {len(unique_ids)} quicklook processing files for dataset: {dataset.upper()}.")
+            
+    return total_reports
             
 def generate_report(dataset, processing_type, file_ids, logger):
     """Generate report for the dataset using associated files.
@@ -251,7 +256,7 @@ def publish_report(dataset_email, logger):
         sigevent_data = f"Error - {e}"
         handle_error(sigevent_description, sigevent_data, logger)
     
-    logger.info(f"Message published to SNS Topic: {topic_arn}.")
+    logger.info(f"Daily report published to SNS Topic: {topic_arn}.")
     
 def remove_processing_files(dataset_dict, logger):
     """Compress and remove logs (txt) and registry (dat) processing files."""
@@ -279,10 +284,13 @@ def remove_processing_files(dataset_dict, logger):
         logger.info(f"Archive of processing files written to: {zip_file}")
             
         # Delete all files in list
-        logger.info("Removing processing files as they have been archived.")
+        logger.info("Removing processing files from EFS as they have been archived.")
         for file in file_list: 
             file.unlink()
             logger.info(f"Deleted: {file}.")
+    
+    else:
+        logger.info("No processing files to archive or remove from the EFS.")
                 
         
 def handle_error(sigevent_description, sigevent_data, logger):
