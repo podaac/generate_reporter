@@ -14,7 +14,6 @@ It performs the following:
 # Standard imports
 import datetime
 import glob
-import json
 import logging
 import os
 import pathlib
@@ -64,6 +63,7 @@ def event_handler(event, context):
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, logger)
+            logger.info("Combining daily reports into a single report for all datasets.")
             combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, logger)
         
     # Publish report
@@ -91,7 +91,7 @@ def get_logger():
     console_handler = logging.StreamHandler()
 
     # Create a formatter and add it to the handler
-    console_format = logging.Formatter("%(asctime)s - %(module)s - %(levelname)s : %(message)s")
+    console_format = logging.Formatter("%(module)s - %(levelname)s : %(message)s")
     console_handler.setFormatter(console_format)
 
     # Add handlers to logger
@@ -117,12 +117,12 @@ def locate_processing_files(dataset_dict, logger):
         if len(refined_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in refined_processing_files ]
             dataset_dict[dataset]["refined"] = unique_ids
-            logger.info(f"Found refined processing files for dataset: {dataset.upper()}.")
+            logger.info(f"Found {len(unique_ids)} refined processing file(s) for dataset: {dataset.upper()}.")
         quicklook_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*quicklook*.dat")
         if len(quicklook_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in quicklook_processing_files ]
             dataset_dict[dataset]["quicklook"] = unique_ids
-            logger.info(f"Found quicklook processing files for dataset: {dataset.upper()}.")
+            logger.info(f"Found {len(unique_ids)} quicklook processing files for dataset: {dataset.upper()}.")
             
 def generate_report(dataset, processing_type, file_ids, logger):
     """Generate report for the dataset using associated files.
@@ -142,6 +142,7 @@ def generate_report(dataset, processing_type, file_ids, logger):
     for file_id in file_ids:
         lambda_task_root = os.getenv('LAMBDA_TASK_ROOT')
         try:
+            logger.info(f"Creating report for {dataset.upper()} from unique id: {file_id}.")
             if dataset == "modis_a" or dataset == "modis_t":
                 subprocess.run([f"{lambda_task_root}/print_modis_daily_report.csh", \
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
@@ -278,8 +279,10 @@ def remove_processing_files(dataset_dict, logger):
         logger.info(f"Archive of processing files written to: {zip_file}")
             
         # Delete all files in list
-        for file in file_list: file.unlink()
-        logger.info("Processing files deleted from log and scratch directories.")
+        logger.info("Removing processing files as they have been archived.")
+        for file in file_list: 
+            file.unlink()
+            logger.info(f"Deleted: {file}.")
                 
         
 def handle_error(sigevent_description, sigevent_data, logger):
