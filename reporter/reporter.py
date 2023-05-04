@@ -60,7 +60,7 @@ def event_handler(event, context):
         "modis_t": { "quicklook": "", "refined": "" }, 
         "viirs":   { "quicklook": "", "refined": "" }
     }
-    logger.info(f"Generating and combining {len(total_reports)} daily reports.")
+    logger.info(f"Generating and combining {total_reports} daily reports.")
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, logger)
