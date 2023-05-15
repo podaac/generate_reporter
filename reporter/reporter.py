@@ -81,7 +81,9 @@ def event_handler(event, context):
         
         # Remove reports directory
         try:
-            shutil.rmtree(DATA_DIR.joinpath("scratch", "reports"))
+            reports_dir = DATA_DIR.joinpath("scratch", "reports")
+            shutil.rmtree(reports_dir)
+            logger.info(f"Removed reports directory: {reports_dir}")
         except OSError as e:
             report_dir = DATA_DIR.joinpath("scratch", "reports")
             sigevent_description = f"Could not delete reports directory: {report_dir}."
