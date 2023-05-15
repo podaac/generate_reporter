@@ -17,6 +17,7 @@ import glob
 import logging
 import os
 import pathlib
+import shutil
 import subprocess
 from subprocess import PIPE
 import sys
@@ -67,10 +68,25 @@ def event_handler(event, context):
             combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, logger)
         
     # Publish report
-    publish_report(dataset_email, logger)
+    date = datetime.datetime.now(datetime.timezone.utc)
+    message = publish_report(dataset_email, date, logger)
+    message_txt = write_message_txt(message, date, logger)
     
     # Remove logs and registries
-    remove_processing_files(dataset_dict, logger)
+    zipped = remove_processing_files(dataset_dict, message_txt, logger)
+    
+    # Upload archive to S3 bucket
+    if zipped:
+        upload_archive(prefix, zipped, logger)
+        
+        # Remove reports directory
+        try:
+            shutil.rmtree(DATA_DIR.joinpath("scratch", "reports"))
+        except OSError as e:
+            report_dir = DATA_DIR.joinpath("scratch", "reports")
+            sigevent_description = f"Could not delete reports directory: {report_dir}."
+            sigevent_data = f"Error - {e}"
+            handle_error(sigevent_description, sigevent_data, logger)
     
     end = datetime.datetime.now()
     logger.info(f"Execution time - {end - start}.")
@@ -178,7 +194,7 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     """
     
     # Create reports directory if it does not exist
-    report_dir = DATA_DIR.joinpath("scratch")
+    report_dir = DATA_DIR.joinpath("scratch", "reports")
     report_dir.mkdir(parents=True, exist_ok=True)
     
     # Locate refined reports and create email
@@ -186,7 +202,7 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     num_files_registry = 0
     
     for file_id in file_ids:
-        report_name = report_dir.joinpath("reports", f"daily_report_{dataset.upper()}_{processing_type.upper()}_{file_id}.txt")
+        report_name = report_dir.joinpath(f"daily_report_{dataset.upper()}_{processing_type.upper()}_{file_id}.txt")
         if report_name.exists():
             with open(report_name) as fh:
                 report_lines = fh.read().splitlines()
@@ -216,10 +232,10 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
         dataset_email[dataset][processing_type] += f"Date_printed: {date_printed}\n"
     
     # Record the number of files processed both from logs and in registry
-    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
-    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
+    dataset_email[dataset][processing_type] += f"Number of files processed from logs: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
+    dataset_email[dataset][processing_type] += f"Number of files processed from registry: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
 
-def publish_report(dataset_email, logger):
+def publish_report(dataset_email, date, logger):
     """Publish report to SNS Topic."""
     
     sns = boto3.client("sns")
@@ -236,10 +252,10 @@ def publish_report(dataset_email, logger):
             topic_arn = topic["TopicArn"]
             
     # Publish to topic
-    date = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
-    subject = f"Generate Daily Processing Report {date} UTC"
+    date_str = date.strftime("%a %b %d %H:%M:%S %Y")
+    subject = f"Generate Daily Processing Report {date_str} UTC"
     # Processing report
-    message = f"Generate Processing Report for {date} UTC\n\n"
+    message = f"Generate Processing Report for {date_str} UTC\n\n"
     line = "==========================================================================================\n"
     for processing_type in dataset_email.values():
         for email in processing_type.values():
@@ -256,9 +272,20 @@ def publish_report(dataset_email, logger):
         sigevent_data = f"Error - {e}"
         handle_error(sigevent_description, sigevent_data, logger)
     
-    logger.info(f"Daily report published to SNS Topic: {topic_arn}.")
+    logger.info(f"Daily report published to SNS Topic: {topic_arn}.")   
     
-def remove_processing_files(dataset_dict, logger):
+    return message
+
+def write_message_txt(message, date, logger):
+    """Write message to file so it can be included in archive."""
+    
+    date_str = date.strftime("%Y%m%d")
+    message_txt = DATA_DIR.joinpath("scratch", "reports", f"daily_report_{date_str}.txt")
+    with open(message_txt, 'w') as fh:
+        fh.write(message)
+    return message_txt
+    
+def remove_processing_files(dataset_dict, daily_report, logger):
     """Compress and remove logs (txt) and registry (dat) processing files."""
     
     # Generate list of processing files
@@ -278,9 +305,10 @@ def remove_processing_files(dataset_dict, logger):
         archive_dir = DATA_DIR.joinpath("scratch", "reports", "archive")
         archive_dir.mkdir(parents=True, exist_ok=True)
         today = datetime.datetime.now().strftime("%Y%m%d")
-        zip_file = archive_dir.joinpath(f"{today}_process_files.zip")
+        zip_file = archive_dir.joinpath(f"{today}_daily_report_files.zip")
         with zipfile.ZipFile(zip_file, mode='w') as archive:
             for file in file_list: archive.write(file, arcname=file.name)
+            archive.write(daily_report, arcname=daily_report.name)    # Include daily report that was generated
         logger.info(f"Archive of processing files written to: {zip_file}")
             
         # Delete all files in list
@@ -288,11 +316,34 @@ def remove_processing_files(dataset_dict, logger):
         for file in file_list: 
             file.unlink()
             logger.info(f"Deleted: {file}.")
+            
+        return zip_file
     
     else:
         logger.info("No processing files to archive or remove from the EFS.")
-                
+        return None
+
+def upload_archive(prefix, zipped, logger):
+    """Uploaded archived quarantine files to S3 bucket and then delete zip from 
+    file system."""
+    
+    year = datetime.datetime.now().year
+    try:
+        s3 = boto3.client("s3")
         
+        # Upload file to S3
+        s3.upload_file(str(zipped), prefix, f"archive/reporter/{year}/{zipped.name}", ExtraArgs={"ServerSideEncryption": "aws:kms"})
+        logger.info(f"Uploaded: s3://{prefix}/archive/reporter/{year}/{zipped.name}.")
+        
+        # Delete file from EFS
+        zipped.unlink()
+        logger.info(f"File deleted: {zipped}.")
+            
+    except botocore.exceptions.ClientError as e:
+        sigevent_description = f"Error encountered uploading zip files to: s3://{prefix}/archive/{year}/."
+        sigevent_data = f"Error - {e}"
+        handle_error(sigevent_description, sigevent_data, logger)
+
 def handle_error(sigevent_description, sigevent_data, logger):
     """Handle errors by logging them and sending out a notification."""
     
