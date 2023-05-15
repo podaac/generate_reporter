@@ -117,15 +117,15 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
         "Action" : [
           "s3:ListBucket"
         ],
-        "Resource" : "${data.aws_s3_bucket.download_lists.arn}"
+        "Resource" : "${data.aws_s3_bucket.generate_data.arn}"
       },
       {
-        "Sid" : "AllowGetObject",
+        "Sid" : "AllowPutObject",
         "Effect" : "Allow",
         "Action" : [
-          "s3:GetObject"
+          "s3:PutObject"
         ],
-        "Resource" : "${data.aws_s3_bucket.download_lists.arn}/*"
+        "Resource" : "${data.aws_s3_bucket.generate_data.arn}/*"
       }
     ]
   })
