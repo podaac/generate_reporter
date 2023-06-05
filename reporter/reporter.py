@@ -130,6 +130,7 @@ def locate_processing_files(dataset_dict, logger):
         dictionary of 'aqua', 'terra' and 'viirs' keys with quicklook and refined.
     """
     
+    # Registry files
     total_reports = 0
     for dataset in dataset_dict.keys():
         refined_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*refined*.dat")
@@ -137,14 +138,47 @@ def locate_processing_files(dataset_dict, logger):
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in refined_processing_files ]
             dataset_dict[dataset]["refined"] = unique_ids
             total_reports += len(unique_ids)
-            logger.info(f"Found {len(unique_ids)} refined processing file(s) for dataset: {dataset.upper()}.")
+            logger.info(f"Found {len(unique_ids)} refined registry file(s) for dataset: {dataset.upper()}.")
         quicklook_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*quicklook*.dat")
         if len(quicklook_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in quicklook_processing_files ]
             dataset_dict[dataset]["quicklook"] = unique_ids
             total_reports += len(unique_ids)
-            logger.info(f"Found {len(unique_ids)} quicklook processing files for dataset: {dataset.upper()}.")
-            
+            logger.info(f"Found {len(unique_ids)} quicklook registry file(s) for dataset: {dataset.upper()}.")
+    
+    # Handle cases where there is an empty registry and no processing log        
+    for dataset, ptype_dict in dataset_dict.items():
+        for unique_ids in ptype_dict.values():
+            for unique_id in unique_ids:
+                plog = DATA_DIR.joinpath('logs', 'processing_logs', f"ghrsst_{dataset}_processing_log_archive_{unique_id}.txt")
+                if not plog.exists(): plog.touch()
+                
+    
+    # Processing logs
+    for dataset in dataset_dict.keys():
+        processing_files = glob.glob(f"{str(DATA_DIR.joinpath('logs', 'processing_logs'))}/ghrsst_{dataset}_processing_log_archive_*.txt")
+        if len(processing_files) != 0:
+            for processing_file in processing_files:
+                with open(processing_file) as fh:
+                    data = fh.read().splitlines()
+                    if len(data) > 0:
+                        if "QUICKLOOK" in data[0]:
+                            unique_id = processing_file.split('_')[-1].split('.')[0]
+                            if unique_id not in dataset_dict[dataset]["quicklook"]:
+                                dataset_dict[dataset]["quicklook"].append(unique_id)
+                                total_reports += 1
+                                logger.info(f"Found quicklook processing log for dataset: {processing_file}.")
+                                plog = DATA_DIR.joinpath('scratch', f"ghrsst_master_{dataset}_quicklook_list_processed_files_{unique_id}.dat")
+                                if not plog.exists(): plog.touch()
+                        else:
+                            unique_id = processing_file.split('_')[-1].split('.')[0]
+                            if unique_id not in dataset_dict[dataset]["refined"]:
+                                dataset_dict[dataset]["refined"].append(unique_id)
+                                total_reports += 1
+                                logger.info(f"Found refined processing log for dataset: {processing_file}.")
+                                plog = DATA_DIR.joinpath('scratch', f"ghrsst_master_{dataset}_refined_list_processed_files_{unique_id}.dat")
+                                if not plog.exists(): plog.touch()
+
     return total_reports
             
 def generate_report(dataset, processing_type, file_ids, logger):
