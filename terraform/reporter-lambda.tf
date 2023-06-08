@@ -5,7 +5,7 @@ resource "aws_lambda_function" "aws_lambda_reporter" {
   role          = aws_iam_role.aws_lambda_reporter_execution_role.arn
   package_type  = "Image"
   memory_size   = 256
-  timeout       = 600
+  timeout       = 900
   vpc_config {
     subnet_ids         = data.aws_subnets.private_application_subnets.ids
     security_group_ids = data.aws_security_groups.vpc_default_sg.ids
@@ -183,7 +183,7 @@ resource "aws_scheduler_schedule" "aws_schedule_reporter" {
   flexible_time_window {
     mode = "OFF"
   }
-  schedule_expression = "cron(55 23 * * ? *)"
+  schedule_expression = "cron(44 23 * * ? *)"
   target {
     arn      = aws_lambda_function.aws_lambda_reporter.arn
     role_arn = aws_iam_role.aws_eventbridge_reporter_execution_role.arn
