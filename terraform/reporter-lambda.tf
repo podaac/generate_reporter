@@ -4,7 +4,7 @@ resource "aws_lambda_function" "aws_lambda_reporter" {
   function_name = "${var.prefix}-reporter"
   role          = aws_iam_role.aws_lambda_reporter_execution_role.arn
   package_type  = "Image"
-  memory_size   = 256
+  memory_size   = 1024
   timeout       = 900
   vpc_config {
     subnet_ids         = data.aws_subnets.private_application_subnets.ids

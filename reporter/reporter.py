@@ -238,7 +238,7 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     num_files_registry = 0
     
     for file_id in file_ids:
-        report_name = report_dir.joinpath(f"daily_report_{dataset.upper()}_{processing_type.upper()}_{file_id}.txt")
+        report_name = report_dir.joinpath(f"daily_report_{dataset.upper()}_{processing_type.upper()}_{file_id}.txt")    
         if report_name.exists():
             with open(report_name) as fh:
                 report_lines = fh.read().splitlines()
@@ -246,22 +246,16 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
             if len(report_lines) != 0:
                 # Beginning of report
                 if dataset_email[dataset][processing_type] == "":
-                    if "There were no" in report_lines[0]: 
-                        dataset_email[dataset][processing_type] += report_lines[0] + "\n"
-                    else:
-                        dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
-                # Locate number of files processed if applicable
-                if not "There were no" in report_lines[0]:
-                    num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
-                    num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
+                    dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
+                num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
+                num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
             logger.info(f"Read and processed report: {report_name}.")
         else:
             logger.error(f"Cannot locate daily report: {report_name}.")
             sigevent_description = f"Cannot locate daily report: {report_name}."
             handle_error(sigevent_description, "", logger)
     
-    # Beginning of report when no files are processed
-    if num_files_processed == 0 or num_files_registry == 0:
+    if len(file_ids) == 0:    # No reports produced for dataset/processing type
         date_printed = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
         dataset_email[dataset][processing_type] += "==========================================================================================\n"
         dataset_email[dataset][processing_type] += f"Product: list of {processing_type.upper()} {dataset.upper()} L2P files processed\n"
