@@ -36,7 +36,7 @@ variable "prefix" {
   description = "Prefix to add to all AWS resources as a unique identifier"
 }
 
-variable "sns_topic_email" {
+variable "sns_topic_reporter_email" {
   type        = string
   description = "Email address to send reports to"
 }
