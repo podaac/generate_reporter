@@ -171,7 +171,7 @@ resource "aws_sns_topic_policy" "aws_sns_topic_reporter_policy" {
 }
 
 resource "aws_sns_topic_subscription" "aws_sns_topic_reporter_subscription" {
-  endpoint  = var.sns_topic_email
+  endpoint  = var.sns_topic_reporter_email
   protocol  = "email"
   topic_arn = aws_sns_topic.aws_sns_topic_reporter.arn
 }
