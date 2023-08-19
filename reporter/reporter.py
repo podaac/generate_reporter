@@ -14,10 +14,10 @@ It performs the following:
 # Standard imports
 import datetime
 import glob
-import json
 import logging
 import os
 import pathlib
+import shutil
 import subprocess
 from subprocess import PIPE
 import sys
@@ -26,7 +26,6 @@ import zipfile
 # Third-party imports
 import boto3
 import botocore
-import fsspec
 
 # Local imports
 from notify import notify
@@ -54,7 +53,7 @@ def event_handler(event, context):
         "modis_t": { "quicklook": [], "refined": [] }, 
         "viirs":   { "quicklook": [], "refined": [] }
     }
-    locate_processing_files(dataset_dict, logger)
+    total_reports = locate_processing_files(dataset_dict, logger)
     
     # Generate reports for each unique identifier and combine into single report
     dataset_email = { 
@@ -62,24 +61,34 @@ def event_handler(event, context):
         "modis_t": { "quicklook": "", "refined": "" }, 
         "viirs":   { "quicklook": "", "refined": "" }
     }
+    logger.info(f"Generating and combining {total_reports} daily reports.")
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, logger)
             combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, logger)
-            
-    # Report on refined SST in holding tank
-    refined_sst_email = {
-        "aqua":  "", 
-        "terra": "", 
-        "viirs": ""
-    }
-    generate_refined_report(prefix, refined_sst_email, logger)
         
     # Publish report
-    publish_report(dataset_email, refined_sst_email, logger)
+    date = datetime.datetime.now(datetime.timezone.utc)
+    message = publish_report(dataset_email, date, logger)
+    message_txt = write_message_txt(message, date, logger)
     
     # Remove logs and registries
-    remove_processing_files(dataset_dict, logger)
+    zipped = remove_processing_files(dataset_dict, message_txt, logger)
+    
+    # Upload archive to S3 bucket
+    if zipped:
+        upload_archive(prefix, zipped, logger)
+        
+        # Remove reports directory
+        try:
+            reports_dir = DATA_DIR.joinpath("scratch", "reports")
+            shutil.rmtree(reports_dir)
+            logger.info(f"Removed reports directory: {reports_dir}")
+        except OSError as e:
+            report_dir = DATA_DIR.joinpath("scratch", "reports")
+            sigevent_description = f"Could not delete reports directory: {report_dir}."
+            sigevent_data = f"Error - {e}"
+            handle_error(sigevent_description, sigevent_data, logger)
     
     end = datetime.datetime.now()
     logger.info(f"Execution time - {end - start}.")
@@ -100,7 +109,7 @@ def get_logger():
     console_handler = logging.StreamHandler()
 
     # Create a formatter and add it to the handler
-    console_format = logging.Formatter("%(asctime)s - %(module)s - %(levelname)s : %(message)s")
+    console_format = logging.Formatter("%(module)s - %(levelname)s : %(message)s")
     console_handler.setFormatter(console_format)
 
     # Add handlers to logger
@@ -121,17 +130,56 @@ def locate_processing_files(dataset_dict, logger):
         dictionary of 'aqua', 'terra' and 'viirs' keys with quicklook and refined.
     """
     
+    # Registry files
+    total_reports = 0
     for dataset in dataset_dict.keys():
         refined_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*refined*.dat")
         if len(refined_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in refined_processing_files ]
             dataset_dict[dataset]["refined"] = unique_ids
-            logger.info(f"Found refined processing files for dataset: {dataset.upper()}.")
+            total_reports += len(unique_ids)
+            logger.info(f"Found {len(unique_ids)} refined registry file(s) for dataset: {dataset.upper()}.")
         quicklook_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*quicklook*.dat")
         if len(quicklook_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in quicklook_processing_files ]
             dataset_dict[dataset]["quicklook"] = unique_ids
-            logger.info(f"Found quicklook processing files for dataset: {dataset.upper()}.")
+            total_reports += len(unique_ids)
+            logger.info(f"Found {len(unique_ids)} quicklook registry file(s) for dataset: {dataset.upper()}.")
+    
+    # Handle cases where there is an empty registry and no processing log        
+    for dataset, ptype_dict in dataset_dict.items():
+        for unique_ids in ptype_dict.values():
+            for unique_id in unique_ids:
+                plog = DATA_DIR.joinpath('logs', 'processing_logs', f"ghrsst_{dataset}_processing_log_archive_{unique_id}.txt")
+                if not plog.exists(): plog.touch()
+                
+    
+    # Processing logs
+    for dataset in dataset_dict.keys():
+        processing_files = glob.glob(f"{str(DATA_DIR.joinpath('logs', 'processing_logs'))}/ghrsst_{dataset}_processing_log_archive_*.txt")
+        if len(processing_files) != 0:
+            for processing_file in processing_files:
+                with open(processing_file) as fh:
+                    data = fh.read().splitlines()
+                    if len(data) > 0:
+                        if "QUICKLOOK" in data[0]:
+                            unique_id = processing_file.split('_')[-1].split('.')[0]
+                            if unique_id not in dataset_dict[dataset]["quicklook"]:
+                                dataset_dict[dataset]["quicklook"].append(unique_id)
+                                total_reports += 1
+                                logger.info(f"Found quicklook processing log for dataset: {processing_file}.")
+                                plog = DATA_DIR.joinpath('scratch', f"ghrsst_master_{dataset}_quicklook_list_processed_files_{unique_id}.dat")
+                                if not plog.exists(): plog.touch()
+                        else:
+                            unique_id = processing_file.split('_')[-1].split('.')[0]
+                            if unique_id not in dataset_dict[dataset]["refined"]:
+                                dataset_dict[dataset]["refined"].append(unique_id)
+                                total_reports += 1
+                                logger.info(f"Found refined processing log for dataset: {processing_file}.")
+                                plog = DATA_DIR.joinpath('scratch', f"ghrsst_master_{dataset}_refined_list_processed_files_{unique_id}.dat")
+                                if not plog.exists(): plog.touch()
+
+    return total_reports
             
 def generate_report(dataset, processing_type, file_ids, logger):
     """Generate report for the dataset using associated files.
@@ -151,6 +199,7 @@ def generate_report(dataset, processing_type, file_ids, logger):
     for file_id in file_ids:
         lambda_task_root = os.getenv('LAMBDA_TASK_ROOT')
         try:
+            logger.info(f"Creating report for {dataset.upper()} from unique id: {file_id}.")
             if dataset == "modis_a" or dataset == "modis_t":
                 subprocess.run([f"{lambda_task_root}/print_modis_daily_report.csh", \
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
@@ -181,7 +230,7 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     """
     
     # Create reports directory if it does not exist
-    report_dir = DATA_DIR.joinpath("scratch")
+    report_dir = DATA_DIR.joinpath("scratch", "reports")
     report_dir.mkdir(parents=True, exist_ok=True)
     
     # Locate refined reports and create email
@@ -189,7 +238,7 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     num_files_registry = 0
     
     for file_id in file_ids:
-        report_name = report_dir.joinpath("reports", f"daily_report_{dataset.upper()}_{processing_type.upper()}_{file_id}.txt")
+        report_name = report_dir.joinpath(f"daily_report_{dataset.upper()}_{processing_type.upper()}_{file_id}.txt")    
         if report_name.exists():
             with open(report_name) as fh:
                 report_lines = fh.read().splitlines()
@@ -197,83 +246,26 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
             if len(report_lines) != 0:
                 # Beginning of report
                 if dataset_email[dataset][processing_type] == "":
-                    if "There were no" in report_lines[0]: 
-                        dataset_email[dataset][processing_type] += report_lines[0] + "\n"
-                    else:
-                        dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
-                # Locate number of files processed if applicable
-                if not "There were no" in report_lines[0]:
-                    num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
-                    num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
+                    dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
+                num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
+                num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
             logger.info(f"Read and processed report: {report_name}.")
         else:
             logger.error(f"Cannot locate daily report: {report_name}.")
             sigevent_description = f"Cannot locate daily report: {report_name}."
             handle_error(sigevent_description, "", logger)
     
-    # Beginning of report when no files are processed
-    if num_files_processed == 0 or num_files_registry == 0:
+    if len(file_ids) == 0:    # No reports produced for dataset/processing type
         date_printed = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
         dataset_email[dataset][processing_type] += "==========================================================================================\n"
         dataset_email[dataset][processing_type] += f"Product: list of {processing_type.upper()} {dataset.upper()} L2P files processed\n"
         dataset_email[dataset][processing_type] += f"Date_printed: {date_printed}\n"
     
     # Record the number of files processed both from logs and in registry
-    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
-    dataset_email[dataset][processing_type] += f"Number of files processed: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
+    dataset_email[dataset][processing_type] += f"Number of files processed from logs: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
+    dataset_email[dataset][processing_type] += f"Number of files processed from registry: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
 
-def generate_refined_report(prefix, refined_sst_email, logger):
-    """Generate report data on the number of refined SST files being held
-    in the holding tank (download lists S3 bucket)."""
-    
-    for dataset in refined_sst_email.keys():
-        try:
-            refined_sst_email[dataset] = load_holding_tank(prefix, dataset, logger)
-        except Exception as e:
-            sigevent_description = f"Failed to load JSON files from holding tank."
-            sigevent_data = f"Error - {e}"
-            handle_error(sigevent_description, sigevent_data, logger)
-        
-def load_holding_tank(prefix, dataset, logger):
-    """Load JSON files and trach the number of refined SST files.
-    
-    Returns number of SST files.
-    """
-    
-    sst = 0
-    s3_client = boto3.client("s3")
-    try:
-        response = s3_client.list_objects_v2(Bucket=f"{prefix}-download-lists", Prefix=f"holding_tank/{dataset}")
-    except botocore.exceptions.ClientError as e:
-        raise e
-    
-    # List files
-    if not "Contents" in response.keys(): 
-        logger.info(f"No files were found in the holding tank for {dataset}.")
-        return sst
-    
-    if len(response["Contents"]) > 0:
-        logger.info(f"Files were found in the holding tank for {dataset}.")
-        json_files = []
-        for item in response["Contents"]:
-            if item["Key"] == f"holding_tank/{dataset}/": continue
-            json_files.append(item["Key"])
-        
-        # Try load file data
-        s3_url = f"s3://{prefix}-download-lists"
-        for json_file in json_files:
-            try:
-                with fsspec.open(f"{s3_url}/{json_file}", mode='r') as fh:
-                    sst += len(json.load(fh))
-            except botocore.exceptions.ClientError as e:    # Delete
-                raise e
-            except Exception as e:
-                logger.info(f"Issue with JSON file: {json_file['Key']}.")    # fsspec
-                raise e
-            
-    return sst
-
-def publish_report(dataset_email, refined_sst_email, logger):
+def publish_report(dataset_email, date, logger):
     """Publish report to SNS Topic."""
     
     sns = boto3.client("sns")
@@ -290,21 +282,15 @@ def publish_report(dataset_email, refined_sst_email, logger):
             topic_arn = topic["TopicArn"]
             
     # Publish to topic
-    date = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
-    subject = f"Generate Daily Processing Report {date} UTC"
+    date_str = date.strftime("%a %b %d %H:%M:%S %Y")
+    subject = f"Generate Daily Processing Report {date_str} UTC"
     # Processing report
-    message = f"Generate Processing Report for {date} UTC\n\n"
+    message = f"Generate Processing Report for {date_str} UTC\n\n"
     line = "==========================================================================================\n"
     for processing_type in dataset_email.values():
         for email in processing_type.values():
             message += email
             message += "\n"
-    # Refined SST report
-    message += line
-    message += f"Report on refined SST files in the holding tank for {date} UTC\n\n"
-    for dataset, num_sst in refined_sst_email.items():
-        message += f"Number of Refined SST for {DATASET_DICT[dataset]}: {num_sst}\n"
-    message += "\n"
     try:
         response = sns.publish(
             TopicArn = topic_arn,
@@ -316,9 +302,20 @@ def publish_report(dataset_email, refined_sst_email, logger):
         sigevent_data = f"Error - {e}"
         handle_error(sigevent_description, sigevent_data, logger)
     
-    logger.info(f"Message published to SNS Topic: {topic_arn}.")
+    logger.info(f"Daily report published to SNS Topic: {topic_arn}.")   
     
-def remove_processing_files(dataset_dict, logger):
+    return message
+
+def write_message_txt(message, date, logger):
+    """Write message to file so it can be included in archive."""
+    
+    date_str = date.strftime("%Y%m%d")
+    message_txt = DATA_DIR.joinpath("scratch", "reports", f"daily_report_{date_str}.txt")
+    with open(message_txt, 'w') as fh:
+        fh.write(message)
+    return message_txt
+    
+def remove_processing_files(dataset_dict, daily_report, logger):
     """Compress and remove logs (txt) and registry (dat) processing files."""
     
     # Generate list of processing files
@@ -338,16 +335,45 @@ def remove_processing_files(dataset_dict, logger):
         archive_dir = DATA_DIR.joinpath("scratch", "reports", "archive")
         archive_dir.mkdir(parents=True, exist_ok=True)
         today = datetime.datetime.now().strftime("%Y%m%d")
-        zip_file = archive_dir.joinpath(f"{today}_process_files.zip")
+        zip_file = archive_dir.joinpath(f"{today}_daily_report_files.zip")
         with zipfile.ZipFile(zip_file, mode='w') as archive:
             for file in file_list: archive.write(file, arcname=file.name)
+            archive.write(daily_report, arcname=daily_report.name)    # Include daily report that was generated
         logger.info(f"Archive of processing files written to: {zip_file}")
             
         # Delete all files in list
-        for file in file_list: file.unlink()
-        logger.info("Processing files deleted from log and scratch directories.")
-                
+        logger.info("Removing processing files from EFS as they have been archived.")
+        for file in file_list: 
+            file.unlink()
+            logger.info(f"Deleted: {file}.")
+            
+        return zip_file
+    
+    else:
+        logger.info("No processing files to archive or remove from the EFS.")
+        return None
+
+def upload_archive(prefix, zipped, logger):
+    """Uploaded archived quarantine files to S3 bucket and then delete zip from 
+    file system."""
+    
+    year = datetime.datetime.now().year
+    try:
+        s3 = boto3.client("s3")
         
+        # Upload file to S3
+        s3.upload_file(str(zipped), prefix, f"archive/reporter/{year}/{zipped.name}", ExtraArgs={"ServerSideEncryption": "aws:kms"})
+        logger.info(f"Uploaded: s3://{prefix}/archive/reporter/{year}/{zipped.name}.")
+        
+        # Delete file from EFS
+        zipped.unlink()
+        logger.info(f"File deleted: {zipped}.")
+            
+    except botocore.exceptions.ClientError as e:
+        sigevent_description = f"Error encountered uploading zip files to: s3://{prefix}/archive/{year}/."
+        sigevent_data = f"Error - {e}"
+        handle_error(sigevent_description, sigevent_data, logger)
+
 def handle_error(sigevent_description, sigevent_data, logger):
     """Handle errors by logging them and sending out a notification."""
     

@@ -231,27 +231,14 @@ sub print_generic_daily_report
                                     $i_report_year,
                                     $l_date_string_search_token);
 
-
-  if ($num_files_processed > 0) {
-      print "\n";
-      print "==========================================================================================\n";
-      print "Product: list of $i_data_type $i_instrument L2P files processed on $l_date_string_search_token, $year\n";
-      print "Extracted_from: $archive_filename\n";
-      print "Software: Perl module print_generic_daily_report.pl\n";
-      print "Date_printed: " . localtime(time) . "\n";
-      print "Num_files_processed: $num_files_processed, Note: it may be different than from registry.\n"; 
-      print "Num_files_from_registry: $l_num_files_from_registry, g_L2P_registry = $g_L2P_registry\n"; 
-
-      # Change to 2 == 2 if wish to print the actual names of files processed.
-      if (2 == 3) {
-        print "Format: seconds_since_1950, ascii_text_of_date, file_name_processed, SUCCESS_OVERALL_TOTAL_TIME: num_seconds\n";
-        print "\n";
-        print @file_list_processed_on_this_day; 
-        print "\n";
-      }
-  } else {
-      print "There were no $i_data_type $i_instrument L2P files processed on $l_date_string_search_token, $i_report_year\n";
-  }
+  print "\n";
+  print "==========================================================================================\n";
+  print "Product: list of $i_data_type $i_instrument L2P files processed on $l_date_string_search_token, $year\n";
+  print "Extracted_from: $archive_filename\n";
+  print "Software: Perl module print_generic_daily_report.pl\n";
+  print "Date_printed: " . localtime(time) . "\n";
+  print "Num_files_processed: $num_files_processed, Note: it may be different than from registry.\n"; 
+  print "Num_files_from_registry: $l_num_files_from_registry, g_L2P_registry = $g_L2P_registry\n"; 
 
   # ---------- Close up shop ----------
   return ($o_status);

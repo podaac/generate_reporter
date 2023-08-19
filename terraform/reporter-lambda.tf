@@ -4,14 +4,14 @@ resource "aws_lambda_function" "aws_lambda_reporter" {
   function_name = "${var.prefix}-reporter"
   role          = aws_iam_role.aws_lambda_reporter_execution_role.arn
   package_type  = "Image"
-  memory_size   = 256
-  timeout       = 300
+  memory_size   = 1024
+  timeout       = 900
   vpc_config {
     subnet_ids         = data.aws_subnets.private_application_subnets.ids
     security_group_ids = data.aws_security_groups.vpc_default_sg.ids
   }
   file_system_config {
-    arn              = data.aws_efs_access_points.aws_efs_generate_ap.arns[1]
+    arn              = data.aws_efs_access_point.fsap_reporter.arn
     local_mount_path = "/mnt/data"
   }
 }
@@ -84,9 +84,15 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
         "Effect" : "Allow",
         "Action" : [
           "elasticfilesystem:ClientMount",
-          "elasticfilesystem:ClientWrite"
+          "elasticfilesystem:ClientWrite",
+          "elasticfilesystem:DescribeMountTargets"
         ],
-        "Resource" : "${data.aws_efs_access_points.aws_efs_generate_ap.arns[1]}"
+        "Resource" : "${data.aws_efs_access_point.fsap_reporter.file_system_arn}"
+        "Condition" : {
+          "StringEquals": {
+            "elasticfilesystem:AccessPointArn" : "${data.aws_efs_access_point.fsap_reporter.arn}"
+          }
+        }
       },
       {
         "Effect" : "Allow",
@@ -111,15 +117,15 @@ resource "aws_iam_policy" "aws_lambda_reporter_execution_policy" {
         "Action" : [
           "s3:ListBucket"
         ],
-        "Resource" : "${data.aws_s3_bucket.download_lists.arn}"
+        "Resource" : "${data.aws_s3_bucket.generate_data.arn}"
       },
       {
-        "Sid" : "AllowGetObject",
+        "Sid" : "AllowPutObject",
         "Effect" : "Allow",
         "Action" : [
-          "s3:GetObject"
+          "s3:PutObject"
         ],
-        "Resource" : "${data.aws_s3_bucket.download_lists.arn}/*"
+        "Resource" : "${data.aws_s3_bucket.generate_data.arn}/*"
       }
     ]
   })
@@ -165,7 +171,7 @@ resource "aws_sns_topic_policy" "aws_sns_topic_reporter_policy" {
 }
 
 resource "aws_sns_topic_subscription" "aws_sns_topic_reporter_subscription" {
-  endpoint  = var.sns_topic_email
+  endpoint  = var.sns_topic_reporter_email
   protocol  = "email"
   topic_arn = aws_sns_topic.aws_sns_topic_reporter.arn
 }
@@ -177,7 +183,7 @@ resource "aws_scheduler_schedule" "aws_schedule_reporter" {
   flexible_time_window {
     mode = "OFF"
   }
-  schedule_expression = "cron(55 23 * * ? *)"
+  schedule_expression = "cron(44 23 * * ? *)"
   target {
     arn      = aws_lambda_function.aws_lambda_reporter.arn
     role_arn = aws_iam_role.aws_eventbridge_reporter_execution_role.arn
