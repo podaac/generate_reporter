@@ -223,7 +223,7 @@ def generate_report(dataset, processing_type, file_ids, debug, logger):
                 console_out = completed_process.stdout.splitlines()
                 for line in console_out: logger.info(line)       
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode("utf-8").strip()
+            error_msg = e.stderr
             sigevent_description = error_msg if len(error_msg) != 0 else "Error encountered in print_generic_daily_report.csh"
             sigevent_data = f"Subprocess Run command: {e.cmd}"
             handle_error(sigevent_description, sigevent_data, logger)
@@ -265,9 +265,9 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, d
                 num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
             if debug: logger.info(f"Read and processed report: {report_name}.")
         else:
-            logger.error(f"Cannot locate daily report: {report_name}.")
+            sigevent_data = f"Cannot locate daily report created by reporter subprocess command: {report_name}. Final combined report cannot be created."
             sigevent_description = f"Cannot locate daily report: {report_name}."
-            handle_error(sigevent_description, "", logger)
+            handle_error(sigevent_description, sigevent_data, logger)
     
     if len(file_ids) == 0:    # No reports produced for dataset/processing type
         date_printed = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
@@ -404,8 +404,8 @@ def handle_error(sigevent_description, sigevent_data, logger):
     """Handle errors by logging them and sending out a notification."""
     
     sigevent_type = "ERROR"
-    logger.error(sigevent_description)
+    logger.info(sigevent_description)
     logger.error(sigevent_data)
     notify(logger, sigevent_type, sigevent_description, sigevent_data)
-    logger.error("Program exit.")
+    logger.info("Program exit.")
     sys.exit(1)
