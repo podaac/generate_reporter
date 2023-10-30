@@ -66,10 +66,11 @@ def event_handler(event, context):
         "viirs":   { "quicklook": "", "refined": "" }
     }
     logger.info(f"Generating and combining {total_reports} daily reports.")
+    l2p_dict = {"aqua_quicklook_l2p": 0, "aqua_refined_l2p": 0, "terra_quicklook_l2p": 0, "terra_refined_l2p": 0, "viirs_quicklook_l2p": 0, "viirs_refined_l2p": 0}
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, debug, logger)
-            combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, debug, logger)
+            combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, l2p_dict, debug, logger)
         
     # Publish report
     date = datetime.datetime.now(datetime.timezone.utc)
@@ -78,6 +79,9 @@ def event_handler(event, context):
     
     # Remove logs and registries
     zipped = remove_processing_files(dataset_dict, message_txt, debug, logger)
+    
+    # Print final log message
+    print_final_log(logger, l2p_dict)
     
     # Upload archive to S3 bucket
     if zipped:
@@ -228,7 +232,7 @@ def generate_report(dataset, processing_type, file_ids, debug, logger):
             sigevent_data = f"Subprocess Run command: {e.cmd}"
             handle_error(sigevent_description, sigevent_data, logger)
     
-def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, debug, logger):
+def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l2p_dict, debug, logger):
     """Combine reports produced for a single dataset.
     
     Parameters
@@ -280,16 +284,21 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, d
     dataset_email[dataset][processing_type] += f"Number of files processed from registry: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
     
     if dataset == "modis_a":
-        ds = "MODIS Aqua"
+        ds1 = "MODIS Aqua"
+        ds2 = "aqua"
     elif dataset == "modis_t":
-        ds = "MODIS Terra"
+        ds1 = "MODIS Terra"
+        ds2 = "terra"
     else:
-        ds = "VIIRS"
+        ds1 = "VIIRS"
+        ds2 = "viirs"
     if num_files_processed == num_files_registry:
-        logger.info(f"{ds} {processing_type.upper()} L2P granules processed: {num_files_processed}")
+        logger.info(f"{ds1} {processing_type.upper()} L2P granules processed: {num_files_processed}")
     else:
-        logger.info(f"{ds} {processing_type.upper()} L2P granules processed: {num_files_processed}")
-        logger.info(f"{ds} {processing_type.upper()} registry granules: {num_files_registry}")
+        logger.info(f"{ds1} {processing_type.upper()} L2P granules processed: {num_files_processed}")
+        logger.info(f"{ds1} {processing_type.upper()} registry granules: {num_files_registry}")
+    
+    l2p_dict[f"{ds2}_{processing_type.lower()}_l2p"] = num_files_processed
 
 def publish_report(dataset_email, date, logger):
     """Publish report to SNS Topic."""
@@ -409,3 +418,14 @@ def handle_error(sigevent_description, sigevent_data, logger):
     notify(logger, sigevent_type, sigevent_description, sigevent_data)
     logger.info("Program exit.")
     sys.exit(1)
+
+def print_final_log(logger, l2p_dict):
+    """Print final log message."""
+    
+    # Organize file data into a string
+    final_log_message = "l2p_granule_totals"
+    for key,value in l2p_dict.items():
+        final_log_message += f" - {key}: {value}"
+    
+    # Print final log message and remove temp log file
+    logger.info(final_log_message)
