@@ -44,6 +44,10 @@ def event_handler(event, context):
     
     start = datetime.datetime.now()
     
+    if "debug" in event.keys():
+        debug = True
+    else:
+        debug = False
     prefix = event["prefix"]
     logger = get_logger()
     
@@ -62,22 +66,26 @@ def event_handler(event, context):
         "viirs":   { "quicklook": "", "refined": "" }
     }
     logger.info(f"Generating and combining {total_reports} daily reports.")
+    l2p_dict = {"aqua_quicklook_l2p": 0, "aqua_refined_l2p": 0, "terra_quicklook_l2p": 0, "terra_refined_l2p": 0, "viirs_quicklook_l2p": 0, "viirs_refined_l2p": 0}
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
-            generate_report(dataset, processing_type, dataset_files, logger)
-            combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, logger)
+            generate_report(dataset, processing_type, dataset_files, debug, logger)
+            combine_dataset_reports(dataset, processing_type, dataset_files, dataset_email, l2p_dict, debug, logger)
         
     # Publish report
     date = datetime.datetime.now(datetime.timezone.utc)
     message = publish_report(dataset_email, date, logger)
-    message_txt = write_message_txt(message, date, logger)
+    message_txt = write_message_txt(message, date)
     
     # Remove logs and registries
-    zipped = remove_processing_files(dataset_dict, message_txt, logger)
+    zipped = remove_processing_files(dataset_dict, message_txt, debug, logger)
+    
+    # Print final log message
+    print_final_log(logger, l2p_dict)
     
     # Upload archive to S3 bucket
     if zipped:
-        upload_archive(prefix, zipped, logger)
+        upload_archive(prefix, zipped, debug, logger)
         
         # Remove reports directory
         try:
@@ -138,13 +146,13 @@ def locate_processing_files(dataset_dict, logger):
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in refined_processing_files ]
             dataset_dict[dataset]["refined"] = unique_ids
             total_reports += len(unique_ids)
-            logger.info(f"Found {len(unique_ids)} refined registry file(s) for dataset: {dataset.upper()}.")
+            logger.info(f"Found {len(unique_ids)} refined registry files for dataset: {dataset.upper()}.")
         quicklook_processing_files = glob.glob(f"{str(DATA_DIR.joinpath('scratch'))}/*{dataset}*quicklook*.dat")
         if len(quicklook_processing_files) != 0:
             unique_ids = [ processing_file.split('_')[-1].split('.')[0] for processing_file in quicklook_processing_files ]
             dataset_dict[dataset]["quicklook"] = unique_ids
             total_reports += len(unique_ids)
-            logger.info(f"Found {len(unique_ids)} quicklook registry file(s) for dataset: {dataset.upper()}.")
+            logger.info(f"Found {len(unique_ids)} quicklook registry files for dataset: {dataset.upper()}.")
     
     # Handle cases where there is an empty registry and no processing log        
     for dataset, ptype_dict in dataset_dict.items():
@@ -157,31 +165,37 @@ def locate_processing_files(dataset_dict, logger):
     # Processing logs
     for dataset in dataset_dict.keys():
         processing_files = glob.glob(f"{str(DATA_DIR.joinpath('logs', 'processing_logs'))}/ghrsst_{dataset}_processing_log_archive_*.txt")
+        qplog = 0
+        rplog = 0
         if len(processing_files) != 0:
             for processing_file in processing_files:
                 with open(processing_file) as fh:
                     data = fh.read().splitlines()
                     if len(data) > 0:
                         if "QUICKLOOK" in data[0]:
+                            qplog += 1
                             unique_id = processing_file.split('_')[-1].split('.')[0]
                             if unique_id not in dataset_dict[dataset]["quicklook"]:
                                 dataset_dict[dataset]["quicklook"].append(unique_id)
                                 total_reports += 1
-                                logger.info(f"Found quicklook processing log for dataset: {processing_file}.")
+                                logger.info(f"Found quicklook processing log for dataset with no corresponding registry file: {processing_file}.")
                                 plog = DATA_DIR.joinpath('scratch', f"ghrsst_master_{dataset}_quicklook_list_processed_files_{unique_id}.dat")
                                 if not plog.exists(): plog.touch()
                         else:
+                            rplog += 1
                             unique_id = processing_file.split('_')[-1].split('.')[0]
                             if unique_id not in dataset_dict[dataset]["refined"]:
                                 dataset_dict[dataset]["refined"].append(unique_id)
                                 total_reports += 1
-                                logger.info(f"Found refined processing log for dataset: {processing_file}.")
+                                logger.info(f"Found refined processing log for dataset with no corresponding registry file: {processing_file}.")
                                 plog = DATA_DIR.joinpath('scratch', f"ghrsst_master_{dataset}_refined_list_processed_files_{unique_id}.dat")
                                 if not plog.exists(): plog.touch()
+        logger.info(f"Found {rplog} refined processing logs for dataset: {dataset.upper()}.")
+        logger.info(f"Found {qplog} quicklook processing logs for dataset: {dataset.upper()}.")
 
     return total_reports
             
-def generate_report(dataset, processing_type, file_ids, logger):
+def generate_report(dataset, processing_type, file_ids, debug, logger):
     """Generate report for the dataset using associated files.
     
     Parameters
@@ -199,22 +213,26 @@ def generate_report(dataset, processing_type, file_ids, logger):
     for file_id in file_ids:
         lambda_task_root = os.getenv('LAMBDA_TASK_ROOT')
         try:
-            logger.info(f"Creating report for {dataset.upper()} from unique id: {file_id}.")
+            if debug:
+                logger.info(f"Creating report for {dataset.upper()} from unique id: {file_id}.")
             if dataset == "modis_a" or dataset == "modis_t":
-                subprocess.run([f"{lambda_task_root}/print_modis_daily_report.csh", \
+                completed_process = subprocess.run([f"{lambda_task_root}/print_modis_daily_report.csh", \
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
-                    cwd=f"{lambda_task_root}", check=True, stderr=PIPE)
+                    cwd=f"{lambda_task_root}", check=True, capture_output=True, text=True)
             else:
-                subprocess.run([f"{lambda_task_root}/print_generic_daily_report.csh", \
+                completed_process = subprocess.run([f"{lambda_task_root}/print_generic_daily_report.csh", \
                     file_id, dataset.upper(), processing_type.upper(), "today"], \
-                    cwd=f"{lambda_task_root}", check=True, stderr=PIPE)        
+                    cwd=f"{lambda_task_root}", check=True, capture_output=True, text=True) 
+            if debug:
+                console_out = completed_process.stdout.splitlines()
+                for line in console_out: logger.info(line)       
         except subprocess.CalledProcessError as e:
-            error_msg = e.stderr.decode("utf-8").strip()
+            error_msg = e.stderr
             sigevent_description = error_msg if len(error_msg) != 0 else "Error encountered in print_generic_daily_report.csh"
             sigevent_data = f"Subprocess Run command: {e.cmd}"
             handle_error(sigevent_description, sigevent_data, logger)
     
-def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, logger):
+def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l2p_dict, debug, logger):
     """Combine reports produced for a single dataset.
     
     Parameters
@@ -249,11 +267,11 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
                     dataset_email[dataset][processing_type] += report_lines[1] + "\n" + report_lines[2] + "\n" + report_lines[5] + "\n"
                 num_files_processed += int(report_lines[6].split(": ")[1].split(',')[0])
                 num_files_registry += int(report_lines[7].split(": ")[1].split(',')[0])
-            logger.info(f"Read and processed report: {report_name}.")
+            if debug: logger.info(f"Read and processed report: {report_name}.")
         else:
-            logger.error(f"Cannot locate daily report: {report_name}.")
+            sigevent_data = f"Cannot locate daily report created by reporter subprocess command: {report_name}. Final combined report cannot be created."
             sigevent_description = f"Cannot locate daily report: {report_name}."
-            handle_error(sigevent_description, "", logger)
+            handle_error(sigevent_description, sigevent_data, logger)
     
     if len(file_ids) == 0:    # No reports produced for dataset/processing type
         date_printed = datetime.datetime.now(datetime.timezone.utc).strftime("%a %b %d %H:%M:%S %Y")
@@ -264,6 +282,23 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     # Record the number of files processed both from logs and in registry
     dataset_email[dataset][processing_type] += f"Number of files processed from logs: {num_files_processed}, extracted from processing logs: ghrsst_{dataset}_processing_log_archive_*.txt\n"
     dataset_email[dataset][processing_type] += f"Number of files processed from registry: {num_files_registry}, extracted from registry: ghrsst_master_{dataset}_*_list_processed_files_*.dat\n"
+    
+    if dataset == "modis_a":
+        ds1 = "MODIS Aqua"
+        ds2 = "aqua"
+    elif dataset == "modis_t":
+        ds1 = "MODIS Terra"
+        ds2 = "terra"
+    else:
+        ds1 = "VIIRS"
+        ds2 = "viirs"
+    if num_files_processed == num_files_registry:
+        logger.info(f"{ds1} {processing_type.upper()} L2P granules processed: {num_files_processed}")
+    else:
+        logger.info(f"{ds1} {processing_type.upper()} L2P granules processed: {num_files_processed}")
+        logger.info(f"{ds1} {processing_type.upper()} registry granules: {num_files_registry}")
+    
+    l2p_dict[f"{ds2}_{processing_type.lower()}_l2p"] = num_files_processed
 
 def publish_report(dataset_email, date, logger):
     """Publish report to SNS Topic."""
@@ -306,7 +341,7 @@ def publish_report(dataset_email, date, logger):
     
     return message
 
-def write_message_txt(message, date, logger):
+def write_message_txt(message, date):
     """Write message to file so it can be included in archive."""
     
     date_str = date.strftime("%Y%m%d")
@@ -315,7 +350,7 @@ def write_message_txt(message, date, logger):
         fh.write(message)
     return message_txt
     
-def remove_processing_files(dataset_dict, daily_report, logger):
+def remove_processing_files(dataset_dict, daily_report, debug, logger):
     """Compress and remove logs (txt) and registry (dat) processing files."""
     
     # Generate list of processing files
@@ -345,7 +380,7 @@ def remove_processing_files(dataset_dict, daily_report, logger):
         logger.info("Removing processing files from EFS as they have been archived.")
         for file in file_list: 
             file.unlink()
-            logger.info(f"Deleted: {file}.")
+            if debug: logger.info(f"Deleted: {file}.")
             
         return zip_file
     
@@ -353,7 +388,7 @@ def remove_processing_files(dataset_dict, daily_report, logger):
         logger.info("No processing files to archive or remove from the EFS.")
         return None
 
-def upload_archive(prefix, zipped, logger):
+def upload_archive(prefix, zipped, debug, logger):
     """Uploaded archived quarantine files to S3 bucket and then delete zip from 
     file system."""
     
@@ -367,7 +402,7 @@ def upload_archive(prefix, zipped, logger):
         
         # Delete file from EFS
         zipped.unlink()
-        logger.info(f"File deleted: {zipped}.")
+        if debug: logger.info(f"File deleted: {zipped}.")
             
     except botocore.exceptions.ClientError as e:
         sigevent_description = f"Error encountered uploading zip files to: s3://{prefix}/archive/{year}/."
@@ -378,8 +413,19 @@ def handle_error(sigevent_description, sigevent_data, logger):
     """Handle errors by logging them and sending out a notification."""
     
     sigevent_type = "ERROR"
-    logger.error(sigevent_description)
+    logger.info(sigevent_description)
     logger.error(sigevent_data)
     notify(logger, sigevent_type, sigevent_description, sigevent_data)
-    logger.error("Program exit.")
+    logger.info("Program exit.")
     sys.exit(1)
+
+def print_final_log(logger, l2p_dict):
+    """Print final log message."""
+    
+    # Organize file data into a string
+    final_log_message = "l2p_granule_totals"
+    for key,value in l2p_dict.items():
+        final_log_message += f" - {key}: {value}"
+    
+    # Print final log message and remove temp log file
+    logger.info(final_log_message)

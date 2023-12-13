@@ -30,7 +30,7 @@ def publish_event(sigevent_type, sigevent_description, sigevent_data, logger):
     try:
         topics = sns.list_topics()
     except botocore.exceptions.ClientError as e:
-        logger.error("Failed to list SNS Topics.")
+        logger.info("Failed to list SNS Topics.")
         logger.error(f"Error - {e}")
         sys.exit(1)
     for topic in topics["Topics"]:
@@ -39,11 +39,19 @@ def publish_event(sigevent_type, sigevent_description, sigevent_data, logger):
             
     # Publish to topic
     subject = f"Generate Reporter Lambda Failure"
-    message = f"The Generate Reporter component has encountered an error.\n" \
-        + f"Log file: {os.getenv('AWS_LAMBDA_LOG_GROUP_NAME')}/{os.getenv('AWS_LAMBDA_LOG_STREAM_NAME')}.\n" \
+    message = f"The Generate Reporter component has encountered an error.\n\n"
+    
+    message += "LOG INFORMATION:\n" \
+        + f"Log group: {os.getenv('AWS_LAMBDA_LOG_GROUP_NAME')}\n" \
+        + f"Log file: {os.getenv('AWS_LAMBDA_LOG_STREAM_NAME')}.\n\n" 
+        
+    message += "ERROR INFORMATION:\n" \
         + f"Error type: {sigevent_type}.\n" \
         + f"Error description: {sigevent_description}\n"
-    if sigevent_data != "": message += f"Error data: {sigevent_data}"
+    if sigevent_data != "": message += f"Error data: {sigevent_data}\n"
+    
+    message += "\nPlease check the logs for further information.\n\n\n"
+    
     try:
         response = sns.publish(
             TopicArn = topic_arn,
@@ -51,7 +59,7 @@ def publish_event(sigevent_type, sigevent_description, sigevent_data, logger):
             Subject = subject
         )
     except botocore.exceptions.ClientError as e:
-        logger.error(f"Failed to publish to SNS Topic: {topic_arn}.")
+        logger.info(f"Failed to publish to SNS Topic: {topic_arn}.")
         logger.error(f"Error - {e}")
         sys.exit(1)
     
