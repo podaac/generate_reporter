@@ -423,7 +423,7 @@ def print_final_log(logger, l2p_dict):
     """Print final log message."""
     
     # Organize file data into a string
-    final_log_message = ""
+    final_log_message = "final_log: "
     final_log_message = [ f"{key}: {value}" for key,value in l2p_dict.items() ]
     final_log_message = " - ".join(final_log_message)
     
