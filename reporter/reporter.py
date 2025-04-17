@@ -36,7 +36,8 @@ TOPIC_STRING = "reporter"
 DATASET_DICT = {
     "aqua": "MODIS_A",
     "terra": "MODIS_T",
-    "viirs": "VIIRS"
+    "viirs": "VIIRS",
+    "jpss1": "JPSS1"
 }
 
 def event_handler(event, context):
@@ -55,7 +56,8 @@ def event_handler(event, context):
     dataset_dict = { 
         "modis_a": { "quicklook": [], "refined": [] }, 
         "modis_t": { "quicklook": [], "refined": [] }, 
-        "viirs":   { "quicklook": [], "refined": [] }
+        "viirs":   { "quicklook": [], "refined": [] }, 
+        "jpss1":   { "quicklook": [], "refined": [] }
     }
     total_reports = locate_processing_files(dataset_dict, logger)
     
@@ -63,10 +65,14 @@ def event_handler(event, context):
     dataset_email = { 
         "modis_a": { "quicklook": "", "refined": "" }, 
         "modis_t": { "quicklook": "", "refined": "" }, 
-        "viirs":   { "quicklook": "", "refined": "" }
+        "viirs":   { "quicklook": "", "refined": "" }, 
+        "jpss1":   { "quicklook": "", "refined": "" }
     }
     logger.info(f"Generating and combining {total_reports} daily reports.")
-    l2p_dict = {"aqua_quicklook_l2p": 0, "aqua_refined_l2p": 0, "terra_quicklook_l2p": 0, "terra_refined_l2p": 0, "viirs_quicklook_l2p": 0, "viirs_refined_l2p": 0}
+    l2p_dict = {"aqua_quicklook_l2p": 0, "aqua_refined_l2p": 0, 
+                "terra_quicklook_l2p": 0, "terra_refined_l2p": 0, 
+                "viirs_quicklook_l2p": 0, "viirs_refined_l2p": 0, 
+                "jpss1_quicklook_l2p": 0, "jpss1_refined_l2p": 0}
     for dataset, processing_dict in dataset_dict.items():
         for processing_type, dataset_files in processing_dict.items():
             generate_report(dataset, processing_type, dataset_files, debug, logger)
@@ -289,6 +295,9 @@ def combine_dataset_reports(dataset, processing_type, file_ids, dataset_email, l
     elif dataset == "modis_t":
         ds1 = "MODIS Terra"
         ds2 = "terra"
+    elif dataset == "jpss1":
+        ds1 = "JPSS1"
+        ds2 = "jpss1"
     else:
         ds1 = "VIIRS"
         ds2 = "viirs"
